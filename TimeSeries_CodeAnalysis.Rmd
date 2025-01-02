@@ -1,0 +1,461 @@
+---
+title: "ASM Time Series Project"
+author: "Yifan Yao, Dinara Kurmangaliyeva"
+date: "2025-01-02"
+output:
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+The final report summarizing all findings and analyses is available as `TimeSeries_FinalReport.pdf`.
+
+Number of cars made in Spain. Monthly Data
+```{r}
+serie=window(ts(read.table("Turismos.dat")/1000,start=1994,freq=12))
+serie
+```
+
+
+```{r}
+plot(serie, main="Cars made in Spain",ylab="Thousands of Units")
+abline(v=1994:2020,lty=3,col=4)
+```
+
+
+# 1. Identification:
+a) Determine the needed transformations to make the series stationary. Justify the transformations
+carried out using graphical and numerical results.
+b) Analyze the ACF and PACF of the stationary series to identify at least two plausible models. Reason
+about what features of the correlograms you use to identify these models.
+
+## Tranforming series into a stationary one:
+### Is Variance constant?
+```{r}
+boxplot(serie~floor(time(serie)))
+```
+```{r}
+# matrix(serie, nr = 12)
+# length(serie)/12  # 26
+
+m<-apply(matrix(serie,nrow=12),2,mean)
+v<-apply(matrix(serie,nrow=12),2,var)
+
+plot(v~m) # there is an increase. so we have to take logrithm
+abline(lm(v~m),col=2,lty=3)
+```
+
+It is not constant. There is an increase. so we have to take logrithm. 
+
+```{r}
+lnserie <- log(serie)
+plot(lnserie, main="ln Cars made in Spain",ylab="Thousands of Units")
+abline(v=1994:2020,lty=3,col=4)
+```
+
+Let’s check the same plots for the transformed series. 
+```{r}
+matrixlnserie <- matrix(lnserie,nrow=12)
+boxplot(matrixlnserie)
+
+lnm<-apply(matrix(matrixlnserie,nrow=12),2,mean) # ln m
+lnv<-apply(matrix(matrixlnserie,nrow=12),2,var) # ln v
+
+plot(lnv~lnm) # there is an increase. so we have to take logrithm
+abline(lm(lnv~lnm),col=2,lty=3)
+```
+The first transformation is done.
+
+### Is seasonality present?
+Yes seasonality is present, and has a downfall every august.
+
+```{r}
+monthplot(lnserie) # August!!
+ts.plot(matrix(lnserie,nrow=12),col=1:8)
+```
+```{r}
+d12lnserie<-diff(lnserie,lag=12)
+
+plot(d12lnserie)
+abline(h=0)
+abline(h=mean(d12lnserie),col=2)
+
+monthplot(d12lnserie)
+
+ts.plot(matrix(d12lnserie,nrow=12),col=1:8)
+```
+
+
+### Is the mean constant?
+
+```{r}
+# Mean seemingly constant equal to zero!!! 
+# code, the same as before
+plot(d12lnserie)
+abline(h=0)
+abline(h=mean(d12lnserie),col=2)
+mean(d12lnserie) 
+```
+```{r}
+var(lnserie) # 0.164901
+var(d12lnserie) # 0.03583941
+```
+
+
+Check for over-differentiation: Take an extra differentiation and compare the variances.
+
+```{r}
+d1d12lnserie=diff(d12lnserie)
+var(d1d12lnserie) # 0.04014573
+```
+
+
+Is the current series already stationary? Yes. 
+```{r}
+par(mar = c(5, 4, 4, 2))
+acf(d12lnserie,ylim=c(-1,1),lag.max=60,col=c(2,rep(1,3)), main ="ACF(serie)")
+pacf(d12lnserie,ylim=c(-1,1),lag.max=60,col=c(2,rep(1,3)), main ="PACF(serie)")
+
+# the ACF plot is also useful for identifying non-stationary time series. For a stationary time series, the ACF will drop to zero relatively quickly, while the ACF of non-stationary data decreases slowly.
+```
+
+## Final transformation for the Number of cars made in Spain series: $W_t=(1-B^{12})\log X_t$
+
+# 2. Estimation:
+a) Use R to estimate the identified models.
+```{r}
+par(mfrow=c(1,2))
+acf(d12lnserie, ylim=c(-1,1), lag.max = 72,col=c(2,rep(1,11)),lwd=2)
+pacf(d12lnserie, ylim=c(-1,1), lag.max = 72,col=c(rep(1,11),2),lwd=2)
+
+```
+
+## p: AR(3) 
+## q: MA(6) 
+## P: AR(2)
+## Q: MA(1)
+```{r}
+(mod1=arima(lnserie,order=c(3,0,0),seasonal=list(order=c(0,1,1),period=12))) #ar(3) for regular part
+(mod2=arima(lnserie,order=c(0,0,6),seasonal=list(order=c(0,1,1),period=12))) #ma(6) for refular part
+(mod3=arima(lnserie,order=c(1,0,1),seasonal=list(order=c(0,1,1),period=12))) #simplest model arma(1,1) and seasonal part is the same
+```
+
+# 3. Validation:
+```{r}
+#################Validation#################################
+validation=function(model){
+  s=frequency(get(model$series))
+  resi=model$residuals
+  par(mfrow=c(2,2),mar=c(3,3,3,3))
+  #Residuals plot
+  plot(resi,main="Residuals")
+  abline(h=0)
+  abline(h=c(-3*sd(resi),3*sd(resi)),lty=3,col=4)
+  #Square Root of absolute values of residuals (Homocedasticity)
+  scatter.smooth(sqrt(abs(resi)),main="Square Root of Absolute residuals",
+                 lpars=list(col=2))
+  
+  #Normal plot of residuals
+  qqnorm(resi)
+  qqline(resi,col=2,lwd=2)
+  
+  ##Histogram of residuals with normal curve
+  hist(resi,breaks=20,freq=FALSE)
+  curve(dnorm(x,mean=mean(resi),sd=sd(resi)),col=2,add=T)
+  
+  
+  #ACF & PACF of residuals
+  par(mfrow=c(1,2))
+  acf(resi,ylim=c(-1,1),lag.max=60,col=c(2,rep(1,s-1)),lwd=2)
+  pacf(resi,ylim=c(-1,1),lag.max=60,col=c(rep(1,s-1),2),lwd=2)
+  par(mfrow=c(1,1))
+  
+  #Ljung-Box p-values
+  par(mar=c(2,2,1,1))
+  tsdiag(model,gof.lag=7*s)
+  cat("\n--------------------------------------------------------------------\n")
+  print(model)
+  
+  #Stationary and Invertible
+  cat("\nModul of AR Characteristic polynomial Roots: ", 
+      Mod(polyroot(c(1,-model$model$phi))),"\n")
+  cat("\nModul of MA Characteristic polynomial Roots: ",
+      Mod(polyroot(c(1,model$model$theta))),"\n")
+  
+  suppressMessages(require(forecast,quietly=TRUE,warn.conflicts=FALSE))
+  plot(model)
+  
+  #Model expressed as an MA infinity (psi-weights)
+  psis=ARMAtoMA(ar=model$model$phi,ma=model$model$theta,lag.max=36)
+  names(psis)=paste("psi",1:36)
+  cat("\nPsi-weights (MA(inf))\n")
+  cat("\n--------------------\n")
+  print(psis[1:24])
+  
+  #Model expressed as an AR infinity (pi-weights)
+  pis=-ARMAtoMA(ar=-model$model$theta,ma=-model$model$phi,lag.max=36)
+  names(pis)=paste("pi",1:36)
+  cat("\nPi-weights (AR(inf))\n")
+  cat("\n--------------------\n")
+  print(pis[1:24])
+   
+  cat("\nDescriptive Statistics for the Residuals\n")
+  cat("\n----------------------------------------\n") 
+  
+  suppressMessages(require(fBasics,quietly=TRUE,warn.conflicts=FALSE))
+  ##Anderson-Darling test
+  #print(basicStats(resi))
+  
+  ## Add here complementary tests (use with caution!)
+  ##---------------------------------------------------------
+  cat("\nNormality Tests\n")
+  cat("\n--------------------\n")
+ 
+  ##Shapiro-Wilks Normality test
+  print(shapiro.test(resi))
+
+  suppressMessages(require(nortest,quietly=TRUE,warn.conflicts=FALSE))
+  ##Anderson-Darling test
+  print(ad.test(resi))
+  
+  suppressMessages(require(tseries,quietly=TRUE,warn.conflicts=FALSE))
+  ##Jarque-Bera test
+  print(jarque.bera.test(resi))
+  
+  cat("\nHomoscedasticity Test\n")
+  cat("\n--------------------\n")
+  suppressMessages(require(lmtest,quietly=TRUE,warn.conflicts=FALSE))
+  ##Breusch-Pagan test
+  obs=get(model$series)
+  print(bptest(resi~I(obs-resi)))
+  
+  cat("\nIndependence Tests\n")
+  cat("\n--------------------\n")
+  
+  ##Durbin-Watson test
+  print(dwtest(resi~I(1:length(resi))))
+  
+  ##Ljung-Box test
+  cat("\nLjung-Box test\n")
+  print(t(apply(matrix(c(1:4,(1:4)*s)),1,function(el) {
+    te=Box.test(resi,type="Ljung-Box",lag=el)
+    c(lag=(te$parameter),statistic=te$statistic[[1]],p.value=te$p.value)})))
+  
+}
+
+################# Fi Validation #################################
+```
+
+a) Perform the complete analysis of residuals, justifying all assumptions made. Use the corresponding
+tests and graphical results.
+
+b) Include analysis of the expressions of the AR and MA infinite models, discuss if they are causal
+and/or invertible and report some adequacy measures.
+
+```{r}
+#Model1
+validation(mod1)
+
+```
+
+```{r}
+#Model2
+validation(mod2)
+```
+
+
+```{r}
+#Model3
+validation(mod3)
+```
+
+
+
+## c) Check the stability of the proposed models and evaluate their capability of prediction, reserving the last 12 observations.
+d) Select the best model for forecasting.
+
+### model 1
+```{r}
+# model 1
+ultim=c(2018,12)
+pdq=c(3,0,0)
+PDQ=c(0,1,1)
+
+serie2=window(serie,end=ultim)
+lnserie2=log(serie2)
+serie1=window(serie,end=ultim+c(1,0))
+lnserie1=log(serie1)
+
+(modA=arima(lnserie1,order=pdq,seasonal=list(order=PDQ,period=12)))
+(modB=arima(lnserie2,order=pdq,seasonal=list(order=PDQ,period=12)))
+```
+```{r}
+pred=predict(modB,n.ahead=12)
+pr<-ts(c(tail(lnserie2,1),pred$pred),start=ultim,freq=12)
+se<-ts(c(0,pred$se),start=ultim,freq=12)
+
+#Intervals
+tl<-ts(exp(pr-1.96*se),start=ultim,freq=12)
+tu<-ts(exp(pr+1.96*se),start=ultim,freq=12)
+pr<-ts(exp(pr),start=ultim,freq=12)
+
+
+ts.plot(serie,tl,tu,pr,lty=c(1,2,2,1),col=c(1,4,4,2),xlim=ultim[1]+c(-2,+2),type="o",main=paste("Model ARIMA(",paste(pdq,collapse=","),")(",paste(PDQ,collapse=","),")12",sep=""))
+abline(v=(ultim[1]-2):(ultim[1]+2),lty=3,col=4)
+```
+```{r}
+obs=window(serie,start=ultim+c(0,1))
+pr=window(pr,start=ultim+c(0,1))
+ts(data.frame(LowLim=tl[-1],Predic=pr,UpperLim=tu[-1],Observ=obs,Error=obs-pr,PercentError=(obs-pr)/obs),start=ultim+c(0,1),freq=12)
+mod.RMSE1=sqrt(sum((obs-pr)^2)/12)
+mod.MAE1=sum(abs(obs-pr))/12
+mod.RMSPE1=sqrt(sum(((obs-pr)/obs)^2)/12)
+mod.MAPE1=sum(abs(obs-pr)/obs)/12
+
+data.frame("RMSE"=mod.RMSE1,"MAE"=mod.MAE1,"RMSPE"=mod.RMSPE1,"MAPE"=mod.MAPE1)
+mCI1=mean(tu-tl)
+
+cat("\nMean Length CI: ",mCI1)
+```
+### Final Prediction(prediction for Model 1)
+```{r}
+pred=predict(modA,n.ahead=12)
+pr<-ts(c(tail(lnserie1,1),pred$pred),start=ultim+c(1,0),freq=12)
+se<-ts(c(0,pred$se),start=ultim+c(1,0),freq=12)
+
+tl1<-ts(exp(pr-1.96*se),start=ultim+c(1,0),freq=12)
+tu1<-ts(exp(pr+1.96*se),start=ultim+c(1,0),freq=12)
+pr1<-ts(exp(pr),start=ultim+c(1,0),freq=12)
+
+ts.plot(serie,tl1,tu1,pr1,lty=c(1,2,2,1),col=c(1,4,4,2),xlim=c(ultim[1]-2,ultim[1]+3),type="o",main=paste("Model ARIMA(",paste(pdq,collapse=","),")(",paste(PDQ,collapse=","),")12",sep=""))
+abline(v=(ultim[1]-2):(ultim[1]+3),lty=3,col=4)
+(previs2=window(cbind(tl1,pr1,tu1),start=ultim+c(1,0)))
+```
+### model 2 
+```{r}
+ultim=c(2018,12)
+pdq=c(0,0,6)
+PDQ=c(0,1,1)
+
+serie2=window(serie,end=ultim)
+lnserie2=log(serie2)
+serie1=window(serie,end=ultim+c(1,0))
+lnserie1=log(serie1)
+
+(modA=arima(lnserie1,order=pdq,seasonal=list(order=PDQ,period=12)))
+(modB=arima(lnserie2,order=pdq,seasonal=list(order=PDQ,period=12)))
+
+```
+```{r}
+pred=predict(modB,n.ahead=12)
+pr<-ts(c(tail(lnserie2,1),pred$pred),start=ultim,freq=12)
+se<-ts(c(0,pred$se),start=ultim,freq=12)
+
+#Intervals
+tl<-ts(exp(pr-1.96*se),start=ultim,freq=12)
+tu<-ts(exp(pr+1.96*se),start=ultim,freq=12)
+pr<-ts(exp(pr),start=ultim,freq=12)
+
+
+ts.plot(serie,tl,tu,pr,lty=c(1,2,2,1),col=c(1,4,4,2),xlim=ultim[1]+c(-2,+2),type="o",main=paste("Model ARIMA(",paste(pdq,collapse=","),")(",paste(PDQ,collapse=","),")12",sep=""))
+abline(v=(ultim[1]-2):(ultim[1]+2),lty=3,col=4)
+```
+```{r}
+obs=window(serie,start=ultim+c(0,1))
+pr=window(pr,start=ultim+c(0,1))
+ts(data.frame(LowLim=tl[-1],Predic=pr,UpperLim=tu[-1],Observ=obs,Error=obs-pr,PercentError=(obs-pr)/obs),start=ultim+c(0,1),freq=12)
+mod.RMSE2=sqrt(sum((obs-pr)^2)/12)
+mod.MAE2=sum(abs(obs-pr))/12
+mod.RMSPE2=sqrt(sum(((obs-pr)/obs)^2)/12)
+mod.MAPE2=sum(abs(obs-pr)/obs)/12
+
+data.frame("RMSE"=mod.RMSE2,"MAE"=mod.MAE2,"RMSPE"=mod.RMSPE2,"MAPE"=mod.MAPE2)
+mCI2=mean(tu-tl)
+
+cat("\nMean Length CI: ",mCI2)
+```
+
+
+
+
+prediction for model 2(not the final prediction)
+```{r}
+# pred=predict(modA,n.ahead=12)
+# pr<-ts(c(tail(lnserie1,1),pred$pred),start=ultim+c(1,0),freq=12)
+# se<-ts(c(0,pred$se),start=ultim+c(1,0),freq=12)
+
+# tl1<-ts(exp(pr-1.96*se),start=ultim+c(1,0),freq=12)
+# tu1<-ts(exp(pr+1.96*se),start=ultim+c(1,0),freq=12)
+# pr1<-ts(exp(pr),start=ultim+c(1,0),freq=12)
+
+# ts.plot(serie,tl1,tu1,pr1,lty=c(1,2,2,1),col=c(1,4,4,2),xlim=c(ultim[1]-2,ultim[1]+3),type="o",main=paste("Model ARIMA(",paste(pdq,collapse=","),")(",paste(PDQ,collapse=","),")12",sep=""))
+# abline(v=(ultim[1]-2):(ultim[1]+3),lty=3,col=4)
+# (previs3=window(cbind(tl1,pr1,tu1),start=ultim+c(1,0)))
+```
+
+### model 3
+```{r}
+ultim=c(2018,12)
+pdq=c(1,0,1)
+PDQ=c(0,1,1)
+
+serie2=window(serie,end=ultim)
+lnserie2=log(serie2)
+serie1=window(serie,end=ultim+c(1,0))
+lnserie1=log(serie1)
+
+(modA=arima(lnserie1,order=pdq,seasonal=list(order=PDQ,period=12)))
+(modB=arima(lnserie2,order=pdq,seasonal=list(order=PDQ,period=12)))
+```
+
+```{r}
+pred=predict(modB,n.ahead=12)
+pr<-ts(c(tail(lnserie2,1),pred$pred),start=ultim,freq=12)
+se<-ts(c(0,pred$se),start=ultim,freq=12)
+
+#Intervals
+tl<-ts(exp(pr-1.96*se),start=ultim,freq=12)
+tu<-ts(exp(pr+1.96*se),start=ultim,freq=12)
+pr<-ts(exp(pr),start=ultim,freq=12)
+
+
+ts.plot(serie,tl,tu,pr,lty=c(1,2,2,1),col=c(1,4,4,2),xlim=ultim[1]+c(-2,+2),type="o",main=paste("Model ARIMA(",paste(pdq,collapse=","),")(",paste(PDQ,collapse=","),")12",sep=""))
+abline(v=(ultim[1]-2):(ultim[1]+2),lty=3,col=4)
+```
+```{r}
+obs=window(serie,start=ultim+c(0,1))
+pr=window(pr,start=ultim+c(0,1))
+ts(data.frame(LowLim=tl[-1],Predic=pr,UpperLim=tu[-1],Observ=obs,Error=obs-pr,PercentError=(obs-pr)/obs),start=ultim+c(0,1),freq=12)
+mod.RMSE3=sqrt(sum((obs-pr)^2)/12)
+mod.MAE3=sum(abs(obs-pr))/12
+mod.RMSPE3=sqrt(sum(((obs-pr)/obs)^2)/12)
+mod.MAPE3=sum(abs(obs-pr)/obs)/12
+
+data.frame("RMSE"=mod.RMSE1,"MAE"=mod.MAE3,"RMSPE"=mod.RMSPE3,"MAPE"=mod.MAPE3)
+mCI3=mean(tu-tl)
+
+cat("\nMean Length CI: ",mCI3)
+```
+
+```{r}
+resul=data.frame(
+  par=c(length(coef(mod1)),length(coef(mod2)), length(coef(mod3))),
+  Sigma2Z=c(mod1$sigma2,mod2$sigma2, mod3$sigma2),
+  AIC=c(AIC(mod1),AIC(mod2), AIC(mod3)),
+  BIC=c(BIC(mod1),BIC(mod2), BIC(mod3)),
+  RMSE=c(mod.RMSE2,mod.RMSE3, mod.RMSE1),
+  MAE=c(mod.MAE1,mod.MAE2, mod.MAE3),
+  RMSPE=c(mod.RMSPE1,mod.RMSPE2, mod.RMSPE3),
+  MAPE=c(mod.MAPE1,mod.MAPE2, mod.MAPE3),
+  meanLength=c(mCI1,mCI2, mCI3)
+)
+
+row.names(resul)=c("ARIMA(3,0,0)(0,0,1)12","ARIMA(0,0,6)(0,1,1)12", "ARMIA(1,0,1)(0,1,1)12")
+
+resul
+```
+
+Based on the analysis above, we chose Model 1 and its final prediction is in the corresponding part above. 
