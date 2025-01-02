@@ -1,6 +1,6 @@
 
 
----
+
 
 # Time Series Analysis of Car Production in Spain
 
@@ -26,6 +26,3 @@ This repository contains files related to the analysis of the "Turismos" dataset
 - **Tools Used:** R programming for data manipulation, visualization, and modeling.
 - **Findings:** Identified optimal ARIMA models for accurate prediction and explored seasonal and trend dynamics.
 
----
-
-Does this summary work for you? Let me know if you'd like adjustments or additional details.
